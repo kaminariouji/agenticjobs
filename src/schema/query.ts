@@ -58,7 +58,14 @@ export const EMPTY_QUERY: JobQuery = {
 function one(params: URLSearchParams, key: string): string | null {
   const value = params.get(key);
   if (value === null) return null;
-  const trimmed = value.trim();
+  // A NUL byte is not text: PostgreSQL refuses it outright, so `?q=%00` and
+  // `?org=%00` reached the LIKE pattern and answered 500 on every surface
+  // that shares this parse - the page, the API, MCP, the CLI and federated
+  // search at once. Drop the byte rather than reject the query, the same way
+  // an unknown value is dropped. Only NUL: the other control characters
+  // travel fine, and a cap here would turn a too-long numeric filter into a
+  // finite number instead of the fallback the integer parse owes it.
+  const trimmed = value.replace(/\0/g, '').trim();
   return trimmed === '' ? null : trimmed;
 }
 
@@ -99,7 +106,7 @@ export function parseQuery(params: URLSearchParams): JobQuery {
       ...new Set(
         [...params.getAll('tag'), ...params.getAll('tags')]
           .flatMap((value) => value.split(','))
-          .map((value) => value.trim().toLowerCase())
+          .map((value) => value.replace(/\0/g, '').trim().toLowerCase())
           .filter((value) => value !== ''),
       ),
     ].slice(0, 10),
