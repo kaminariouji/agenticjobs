@@ -110,15 +110,22 @@ export async function listInstances(
     where.push(`checked_at > now() - ($${params.length} || ' milliseconds')::interval`);
     where.push('failures = 0');
   }
-  if (options.topic) {
-    params.push(options.topic.toLowerCase());
+  // Both filters are strings that travel into SQL parameters, and a NUL byte
+  // is not text: PostgreSQL refuses it outright, so `?topic=%00` or `?q=%00`
+  // on this route answered 500. Drop the byte - only the byte - and treat a
+  // filter that is nothing but NUL as absent rather than as a search for the
+  // empty string.
+  const topic = (options.topic ?? '').replace(/\0/g, '').trim().toLowerCase();
+  if (topic !== '') {
+    params.push(topic);
     where.push(`descriptor -> 'topics' ? $${params.length}`);
   }
-  if (options.q) {
+  const q = (options.q ?? '').replace(/\0/g, '').trim();
+  if (q !== '') {
     // This is a substring search over directory text, not a user-supplied
     // SQL LIKE pattern. Escape its metacharacters so `%` and `_` in names or
     // URLs are searched as characters.
-    const query = options.q.toLowerCase().replace(/[\\%_]/g, '\\$&');
+    const query = q.toLowerCase().replace(/[\\%_]/g, '\\$&');
     params.push(`%${query}%`);
     where.push(
       `(lower(descriptor ->> 'name') like $${params.length} escape E'\\\\' or lower(descriptor ->> 'tagline') like $${params.length} escape E'\\\\' or url like $${params.length} escape E'\\\\')`,
